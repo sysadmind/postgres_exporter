@@ -352,6 +352,7 @@ type Exporter struct {
 	logger            *slog.Logger
 	metricPrefix      string
 	collectionTimeout time.Duration
+	driverName        string
 }
 
 // ExporterOpt configures Exporter.
@@ -415,6 +416,14 @@ func WithMetricPrefix(prefix string) ExporterOpt {
 	}
 }
 
+// WithDriverName sets the database/sql driver used to connect. Empty means
+// lib/pq's "postgres".
+func WithDriverName(name string) ExporterOpt {
+	return func(e *Exporter) {
+		e.driverName = name
+	}
+}
+
 // WrapLargeCounters configures wrapping counters at 2^53.
 func WrapLargeCounters(wrap bool) ExporterOpt {
 	return func(e *Exporter) {
@@ -467,6 +476,7 @@ func NewExporter(dsn []string, logger *slog.Logger, opts ...ExporterOpt) *Export
 		ServerWithLabels(e.constantLabels),
 		ServerWithLogger(e.logger),
 		ServerWithWrapLargeCounters(e.wrapLargeCounters),
+		ServerWithDriverName(e.driverName),
 	)
 
 	return e

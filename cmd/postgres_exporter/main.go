@@ -14,6 +14,7 @@
 package main
 
 import (
+	"database/sql"
 	"fmt"
 	"net/http"
 	_ "net/http/pprof"
@@ -29,6 +30,7 @@ import (
 	"github.com/prometheus-community/postgres_exporter/collector"
 	"github.com/prometheus-community/postgres_exporter/config"
 	"github.com/prometheus-community/postgres_exporter/exporter"
+	"github.com/prometheus-community/postgres_exporter/internal/rdsiam"
 	"github.com/prometheus/client_golang/prometheus"
 	prometheuscollectors "github.com/prometheus/client_golang/prometheus/collectors"
 	versioncollector "github.com/prometheus/client_golang/prometheus/collectors/version"
@@ -59,6 +61,7 @@ var (
 	datasourceURIFile                   = kingpin.Flag("datasource.uri-file", "Path to a file containing the data source URI. Takes precedence over datasource.uri.").Default("").String()
 	datasourceUserFile                  = kingpin.Flag("datasource.user-file", "Path to a file containing the data source user name.").Default("").String()
 	datasourcePassFile                  = kingpin.Flag("datasource.pass-file", "Path to a file containing the data source password.").Default("").String()
+	datasourceAuth                      = kingpin.Flag("datasource.auth", "How to authenticate to the data source: password, or iam for Amazon RDS IAM database authentication.").Default("password").Enum("password", "iam")
 	collectorFlags                      = newCollectorFlags()
 
 	longRunningTransactionsThreshold = kingpin.Flag(
@@ -173,6 +176,16 @@ func main() {
 		logger.Error("Failed building config", "err", err)
 		os.Exit(1)
 	}
+	if *datasourceAuth == "iam" {
+		// Fail at startup, not on the first scrape, on e.g. a stray password.
+		// sql.Open only parses the DSN; it doesn't connect.
+		for _, dsn := range cfg.DataSourceNames {
+			if _, err := sql.Open(cfg.DriverName, dsn); err != nil {
+				logger.Error("Invalid data source for IAM auth", "err", err)
+				os.Exit(1)
+			}
+		}
+	}
 	logger.Info("Excluded databases", "databases", fmt.Sprintf("%v", cfg.ExcludeDatabases))
 
 	if cfg.UserQueriesPath != "" {
@@ -258,6 +271,9 @@ func buildConfig(dsns []string) (config.Config, error) {
 
 	cfg := config.NewConfigWithDefaults()
 	cfg.DataSourceNames = dsns
+	if *datasourceAuth == "iam" {
+		cfg.DriverName = rdsiam.DriverName("", "")
+	}
 	cfg.MetricPrefix = *metricPrefix
 	cfg.CollectionTimeout = parsedCollectionTimeout
 	cfg.WrapLargeCounters = *wrapLargeCounters
